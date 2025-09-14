@@ -1,0 +1,5 @@
+가상환경 활성화 venv\Scripts\activate
+
+터미널에 streamlit run streamlit_app/app.py 실행
+
+https 서버 열 때: python ./streamlit_app/run_ngrok.py
