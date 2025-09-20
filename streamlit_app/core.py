@@ -5,10 +5,12 @@ from typing import List, Dict, Any, Tuple
 from pathlib import Path
 import datetime, pytz
 import pickle
+from pyproj import Transformer
 
 import numpy as np
 import pandas as pd
 import networkx as nx
+import streamlit as st
 
 # ========= 전역 경로 / 상수 =========
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,7 +30,7 @@ def ensure_kst(dt: datetime.datetime) -> datetime.datetime:
 def to_utc(dt_local: datetime.datetime) -> datetime.datetime:
     return ensure_kst(dt_local).astimezone(pytz.UTC)
 
-# ========= 좌표 변환 =========
+# ========= 좌표 변환 (ENU) =========
 def xy_to_ll(x: float, y: float, lat0: float, lng0: float):
     dlat = y / R
     dlng = x / (R * math.cos(math.radians(lat0)))
@@ -41,14 +43,37 @@ def latlng_to_xy(lat, lng, lat0, lng0):
     y = R * dlat
     return x, y
 
+# ========= 좌표 변환 (WGS84 ↔ UTM 52N) =========
+EPSG_WGS84 = 4326
+EPSG_UTM52 = 32652
+
+_tf_wgs84_to_utm = Transformer.from_crs(EPSG_WGS84, EPSG_UTM52, always_xy=True)  # (lon,lat)->(E,N)
+_tf_utm_to_wgs84 = Transformer.from_crs(EPSG_UTM52, EPSG_WGS84, always_xy=True)  # (E,N)->(lon,lat)
+
+def ll_to_utm(lon: float, lat: float) -> tuple[float, float]:
+    E, N = _tf_wgs84_to_utm.transform(lon, lat)
+    return float(E), float(N)
+
+def utm_to_ll(E: float, N: float) -> tuple[float, float]:
+    lon, lat = _tf_utm_to_wgs84.transform(E, N)
+    return float(lon), float(lat)
+
 # ========= 태양 방위/고도 =========
 from pysolar.solar import get_altitude, get_azimuth
 
-def azimuth_deg_to_unit_xy(az_deg: float) -> Tuple[float, float]:
+def sun_angles_deg(dt_local: datetime.datetime, lat0: float, lng0: float) -> Tuple[float, float]:
+    """그래프 중심(lat0,lng0) 기준으로 한 번만 계산."""
+    dt_utc = to_utc(dt_local)
+    alt = get_altitude(lat0, lng0, dt_utc)
+    az  = get_azimuth(lat0, lng0, dt_utc)
+    return alt, az
+
+def unit_vec_from_azimuth(az_deg: float) -> Tuple[float, float]:
     th = math.radians(az_deg)
-    ux = math.sin(th)  # East
-    uy = math.cos(th)  # North
-    return ux, uy
+    ux = math.sin(th); uy = math.cos(th)  # 태양 방향(동,북)
+    dx, dy = -ux, -uy                     # 태양 반대(그늘 방향)
+    n = math.hypot(dx, dy)
+    return (dx/n, dy/n) if n else (0.0, 0.0)
 
 # ========= 그림자 직사각형 =========
 @dataclass
@@ -71,8 +96,6 @@ class ShadowRect:
         return [p1, p2, p3, p4]
 
 # ========= 데이터 로드 =========
-import streamlit as st
-
 @st.cache_resource(show_spinner=False)
 def load_graph_and_buildings():
     with open(ARTIFACTS_DIR / "graph_xy.pkl", "rb") as f:
@@ -86,28 +109,25 @@ def load_graph_and_buildings():
     lng_center = float(np.mean([G.nodes[n]["lng"] for n in G.nodes]))
     return G, buildings, lat_center, lng_center
 
-# ========= 시각→그림자 =========
-def build_shadow_rects(buildings_df: pd.DataFrame, dt_local: datetime.datetime):
-    dt_utc = to_utc(dt_local)
+# ========= 시각→그림자 (건물) =========
+def build_shadow_rects(buildings_df: pd.DataFrame, dt_local: datetime.datetime,
+                       lat0: float, lng0: float) -> List[ShadowRect]:
+    alt, az = sun_angles_deg(dt_local, lat0, lng0)
+    if alt <= 0:
+        return []
+    dx, dy = unit_vec_from_azimuth(az)
+    tan_alt = math.tan(math.radians(alt))
     rects: List[ShadowRect] = []
     for _, row in buildings_df.iterrows():
-        lat = float(row["lat"]); lng = float(row["lng"])
-        alt = get_altitude(lat, lng, dt_utc)
-        if alt <= 0:  # 태양 고도 0 이하면 그림자 없음
-            continue
-        az  = get_azimuth(lat, lng, dt_utc)
-        L = float(row["height"]) / math.tan(math.radians(alt))
-        ux, uy = azimuth_deg_to_unit_xy(az)
-        dx, dy = -ux, -uy
-        nrm = math.hypot(dx, dy)
-        if nrm == 0: continue
-        dx, dy = dx/nrm, dy/nrm
+        L = float(row["height"]) / tan_alt
         cx0, cy0 = float(row["x"]), float(row["y"])
         cx = cx0 + 0.5 * L * dx
         cy = cy0 + 0.5 * L * dy
         width = 2.0 * float(row["radius"])
-        rects.append(ShadowRect(cx=cx, cy=cy, length=L, width=width, dx=dx, dy=dy,
-                                meta={"latlng": (lat, lng), "alt_deg": alt, "az_deg": az}))
+        rects.append(ShadowRect(
+            cx=cx, cy=cy, length=L, width=width, dx=dx, dy=dy,
+            meta={"latlng": (row["lat"], row["lng"]), "alt_deg": alt, "az_deg": az}
+        ))
     return rects
 
 # ========= 선분×회전사각형 =========
@@ -196,17 +216,147 @@ def nearest_node_xy(G: nx.Graph, x: float, y: float) -> int:
             best, nid = d2, n
     return nid
 
-# ========= 캐시: 시간 → 그림자 → 간선 그늘 =========
+# ========= 가로수(100m 격자) 유틸 =========
+def _poisson_in_square(center_E: float, center_N: float, size_m: float, n: int,
+                       seed: int = 42, max_tries: int = 5):
+    import random
+    rng = random.Random(seed)
+    A = size_m * size_m
+    alpha = 0.85
+    r = alpha * math.sqrt(A / (max(n, 1) * math.pi))
+    h = 0.5 * size_m
+
+    for _ in range(max_tries):
+        pts, active = [], []
+        x0 = rng.uniform(-h, h); y0 = rng.uniform(-h, h)
+        pts.append((x0, y0)); active.append((x0, y0))
+        k, r2 = 30, r*r
+
+        def in_sq(x, y): return (-h <= x <= h) and (-h <= y <= h)
+        def far_enough(x, y):
+            for (px, py) in pts:
+                dx, dy = x - px, y - py
+                if dx*dx + dy*dy < r2: return False
+            return True
+
+        while active and len(pts) < n:
+            ax, ay = active[rng.randrange(len(active))]
+            found = False
+            for _ in range(k):
+                rho = rng.uniform(r, 2*r); th = rng.uniform(0, 2*math.pi)
+                nx_, ny_ = ax + rho*math.cos(th), ay + rho*math.sin(th)
+                if in_sq(nx_, ny_) and far_enough(nx_, ny_):
+                    pts.append((nx_, ny_)); active.append((nx_, ny_))
+                    found = True
+                    if len(pts) >= n: break
+            if not found:
+                active.remove((ax, ay))
+
+        if len(pts) >= n:
+            rng.shuffle(pts); pts = pts[:n]
+            return [(center_E + x, center_N + y) for (x, y) in pts]
+
+        r *= 0.85
+
+    pts = [(rng.uniform(-h, h), rng.uniform(-h, h)) for _ in range(n)]
+    return [(center_E + x, center_N + y) for (x, y) in pts]
+
+def _sample_tree_params(n: int, rng=np.random.default_rng(0),
+                        height_mean=8.0, height_std=2.0,
+                        crown_r_min=2.0, crown_r_max=4.0):
+    heights = np.clip(rng.normal(height_mean, height_std, size=n), 3.0, 20.0)
+    crown_r = rng.uniform(crown_r_min, crown_r_max, size=n)
+    return heights, crown_r
+
+@st.cache_data(show_spinner=False)
+def load_trees_grid_100m(trees_csv_path: Path) -> pd.DataFrame:
+    if not trees_csv_path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(trees_csv_path)
+    df["NUMPOINTS"]   = pd.to_numeric(df["NUMPOINTS"], errors="coerce").fillna(0).astype(int)
+    df["grid_size_m"] = pd.to_numeric(df["grid_size_m"], errors="coerce")
+    df = df[(df["grid_size_m"] == 100) & (df["NUMPOINTS"] > 0)].reset_index(drop=True)
+    if df.empty:
+        st.warning("trees_grid.csv에서 grid_size_m==100 & NUMPOINTS>0 레코드가 없습니다.", icon="⚠️")
+        return df
+    Es, Ns = zip(*[ll_to_utm(lon, lat) for lon, lat in zip(df["lon"], df["lat"])])
+    df["E_center"], df["N_center"] = Es, Ns
+    return df
+
 @st.cache_data(show_spinner=True)
-def compute_shades_for_time(dt_local_iso: str):
+def build_trees_for_time_100m(dt_iso: str, df_grid_100: pd.DataFrame,
+                              height_mean=8.0, height_std=2.0,
+                              crown_r_min=2.0, crown_r_max=4.0,
+                              seed_base: int = 12345) -> pd.DataFrame:
+    if df_grid_100 is None or df_grid_100.empty:
+        return pd.DataFrame()
+    rows = []
+    for i, row in df_grid_100.iterrows():
+        n = int(row["NUMPOINTS"])
+        pts_EN = _poisson_in_square(row["E_center"], row["N_center"], 100, n, seed=seed_base + i)
+        heights, crown_r = _sample_tree_params(
+            n, rng=np.random.default_rng(seed_base + i),
+            height_mean=height_mean, height_std=height_std,
+            crown_r_min=crown_r_min, crown_r_max=crown_r_max
+        )
+        for j, (E, N) in enumerate(pts_EN):
+            lon, lat = utm_to_ll(E, N)
+            rows.append({"lon": lon, "lat": lat,
+                         "height": float(heights[j]), "crown_r": float(crown_r[j])})
+    return pd.DataFrame(rows)
+
+def build_tree_shadow_rects(df_trees: pd.DataFrame, dt_local: datetime.datetime,
+                            lat0: float, lng0: float) -> List[ShadowRect]:
+    alt, az = sun_angles_deg(dt_local, lat0, lng0)
+    if alt <= 0:
+        return []
+    dx, dy = unit_vec_from_azimuth(az)
+    tan_alt = math.tan(math.radians(alt))
+    rects: List[ShadowRect] = []
+    for r in df_trees.itertuples(index=False):
+        L = float(r.height) / tan_alt
+        x0, y0 = latlng_to_xy(r.lat, r.lon, lat0, lng0)
+        cx = x0 + 0.5 * L * dx
+        cy = y0 + 0.5 * L * dy
+        rects.append(ShadowRect(
+            cx=cx, cy=cy, length=L, width=2.0 * float(r.crown_r), dx=dx, dy=dy,
+            meta={"type": "tree", "height": float(r.height),
+                  "crown_r": float(r.crown_r), "alt_deg": alt, "az_deg": az}
+        ))
+    return rects
+
+# ========= 캐시: 시간 → 그림자 → 간선 그늘 (건물 + [옵션]가로수) =========
+@st.cache_data(show_spinner=True)
+def compute_shades_for_time(dt_local_iso: str, use_trees: bool = False):
+    """
+    시간별 그림자 계산.
+    - 건물 그림자: 항상 포함
+    - 가로수 그림자: use_trees=True면 포함 (100m 격자만)
+    리턴: (rects_buildings, rects_trees, shaded_lookup)
+    """
     G, buildings, lat0, lng0 = load_graph_and_buildings()
     dt_local = ensure_kst(datetime.datetime.fromisoformat(dt_local_iso))
-    rects = build_shadow_rects(buildings, dt_local)
+
+    # (1) 건물 그림자
+    rects_buildings = build_shadow_rects(buildings, dt_local, lat0, lng0)
+
+    # (2) 선택: 가로수 그림자
+    rects_trees: List[ShadowRect] = []
+    if use_trees:
+        trees_csv = ARTIFACTS_DIR / "경북대_가로수_위경도.csv"  # <-- 너가 쓰는 파일명에 맞춤
+        df_grid_100 = load_trees_grid_100m(trees_csv)
+        if not df_grid_100.empty:
+            df_trees = build_trees_for_time_100m(dt_local.isoformat(), df_grid_100)
+            rects_trees = build_tree_shadow_rects(df_trees, dt_local, lat0, lng0)
+
+    # (3) 간선 그늘 길이 (겹침 제거)
+    rects_all = rects_buildings + rects_trees
     shaded = {}
     for u, v in G.edges:
         p0 = (G.nodes[u]["x"], G.nodes[u]["y"])
         p1 = (G.nodes[v]["x"], G.nodes[v]["y"])
-        shaded_len = compute_unique_shade_length_for_edge(p0, p1, rects)
+        shaded_len = compute_unique_shade_length_for_edge(p0, p1, rects_all)
         shaded[(u, v)] = shaded_len
         shaded[(v, u)] = shaded_len
-    return rects, shaded
+
+    return rects_buildings, rects_trees, shaded
