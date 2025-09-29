@@ -109,6 +109,35 @@ def load_graph_and_buildings():
     lng_center = float(np.mean([G.nodes[n]["lng"] for n in G.nodes]))
     return G, buildings, lat_center, lng_center
 
+# ========= 교내 가로수 데이터 로드 =========
+@st.cache_data(show_spinner="가로수 데이터 로딩 중...")
+def load_and_merge_tree_data():
+    # artifacts 폴더에 파일
+    tree_loc_path = ARTIFACTS_DIR / "교내_가로수_정보.csv"
+    tree_spec_path = ARTIFACTS_DIR / "수종_정보.csv"
+
+    if not tree_loc_path.exists() or not tree_spec_path.exists():
+        st.warning("가로수 정보 CSV 파일을 찾을 수 없습니다.")
+        return pd.DataFrame()
+
+    # 1. CSV 파일 불러오기
+    trees_df = pd.read_csv(tree_loc_path)   # lat, lng, type
+    species_df = pd.read_csv(tree_spec_path) # type, heit, radius 등
+
+    # 2. 'type' 컬럼 기준으로 데이터 병합
+    merged_df = pd.merge(trees_df, species_df, on='type', how='left')
+
+    # 3. build_tree_shadow_rects 함수가 요구하는 컬럼명으로 변경
+    merged_df.rename(columns={'heit': 'height', 'radius': 'crown_r'}, inplace=True)
+    
+    # 4. 필요한 컬럼만 남기고, 값이 없는 데이터 제거
+    final_cols = ['lat', 'lng', 'height', 'crown_r']
+    if all(col in merged_df.columns for col in final_cols):
+        return merged_df[final_cols].dropna()
+    else:
+        st.error("가로수 데이터에 필요한 컬럼(lat, lng, heit, radius)이 부족합니다.")
+        return pd.DataFrame()
+
 # ========= 시각→그림자 (건물) =========
 def build_shadow_rects(buildings_df: pd.DataFrame, dt_local: datetime.datetime,
                        lat0: float, lng0: float) -> List[ShadowRect]:
@@ -315,7 +344,7 @@ def build_tree_shadow_rects(df_trees: pd.DataFrame, dt_local: datetime.datetime,
     rects: List[ShadowRect] = []
     for r in df_trees.itertuples(index=False):
         L = float(r.height) / tan_alt
-        x0, y0 = latlng_to_xy(r.lat, r.lon, lat0, lng0)
+        x0, y0 = latlng_to_xy(r.lat, r.lng, lat0, lng0)
         cx = x0 + 0.5 * L * dx
         cy = y0 + 0.5 * L * dy
         rects.append(ShadowRect(
@@ -331,8 +360,9 @@ def compute_shades_for_time(dt_local_iso: str, use_trees: bool = False):
     """
     시간별 그림자 계산.
     - 건물 그림자: 항상 포함
-    - 가로수 그림자: use_trees=True면 포함 (100m 격자만)
-    리턴: (rects_buildings, rects_trees, shaded_lookup)
+    - 교내 가로수 그림자: 항상 포함
+    - 교외 가로수 그림자: use_trees=True면 포함 (100m 격자만)
+    리턴: (rects_buildings, rects_campus_trees, rects_trees, shaded_lookup)
     """
     G, buildings, lat0, lng0 = load_graph_and_buildings()
     dt_local = ensure_kst(datetime.datetime.fromisoformat(dt_local_iso))
@@ -340,17 +370,27 @@ def compute_shades_for_time(dt_local_iso: str, use_trees: bool = False):
     # (1) 건물 그림자
     rects_buildings = build_shadow_rects(buildings, dt_local, lat0, lng0)
 
-    # (2) 선택: 가로수 그림자
+    # (2) 교내 가로수 그림자
+
+    df_campus_trees = load_and_merge_tree_data()
+    rects_campus_trees = []
+    if not df_campus_trees.empty:
+        rects_campus_trees = build_tree_shadow_rects(df_campus_trees, dt_local, lat0, lng0)
+
+    # (3) 선택: 가로수 그림자
     rects_trees: List[ShadowRect] = []
     if use_trees:
         trees_csv = ARTIFACTS_DIR / "경북대_가로수_위경도.csv"  # <-- 너가 쓰는 파일명에 맞춤
         df_grid_100 = load_trees_grid_100m(trees_csv)
         if not df_grid_100.empty:
             df_trees = build_trees_for_time_100m(dt_local.isoformat(), df_grid_100)
+            #'lon' 열을 'lng'로 변경하여 데이터 형식 통일
+            if 'lon' in df_trees.columns:
+                df_trees.rename(columns={'lon':'lng'}, inplace=True)
             rects_trees = build_tree_shadow_rects(df_trees, dt_local, lat0, lng0)
 
-    # (3) 간선 그늘 길이 (겹침 제거)
-    rects_all = rects_buildings + rects_trees
+    # (4) 간선 그늘 길이 (겹침 제거)
+    rects_all = rects_buildings + rects_campus_trees + rects_trees
     shaded = {}
     for u, v in G.edges:
         p0 = (G.nodes[u]["x"], G.nodes[u]["y"])
@@ -359,4 +399,4 @@ def compute_shades_for_time(dt_local_iso: str, use_trees: bool = False):
         shaded[(u, v)] = shaded_len
         shaded[(v, u)] = shaded_len
 
-    return rects_buildings, rects_trees, shaded
+    return rects_buildings, rects_campus_trees, rects_trees, shaded

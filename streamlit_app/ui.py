@@ -108,7 +108,7 @@ def render_sponsor_strip(items=None, team_note: str | None = None):
     st.markdown(html_str, unsafe_allow_html=True)
 
 # ---- 지도 그리기 ----
-def build_map(G, rects_buildings, rects_trees, path_ll, clicks, lat0, lng0, show_shadow: bool):
+def build_map(G, rects_buildings, rects_campus_trees, rects_trees, path_ll, clicks, lat0, lng0, show_shadow: bool):
     m = folium.Map(
         location=[lat0, lng0],
         zoom_start=16,
@@ -137,12 +137,21 @@ def build_map(G, rects_buildings, rects_trees, path_ll, clicks, lat0, lng0, show
                 folium.Polygon(pts_ll, color="#000000", weight=1,
                                fill=True, fill_opacity=0.20).add_to(fg_b)
             fg_b.add_to(m)
+        
+        if rects_campus_trees:
+            fg_t_campus = folium.FeatureGroup(name="Campus Tree Shadows", show=True)
+            for r in rects_campus_trees:
+                pts_ll = [xy_to_ll(x, y, lat0, lng0) for (x, y) in r.corners()]
+                folium.Polygon(pts_ll, color="#2ca25f", weight=1.0,
+                               fill=True, fill_opacity=0.22).add_to(fg_t_campus)
+            fg_t_campus.add_to(m)
+
 
         if rects_trees:
             fg_t = folium.FeatureGroup(name="Tree Shadows (100m)", show=True)
             for r in rects_trees:
                 pts_ll = [xy_to_ll(x, y, lat0, lng0) for (x, y) in r.corners()]
-                folium.Polygon(pts_ll, color="#2ca25f", weight=1.0,
+                folium.Polygon(pts_ll, color="#2ca29c", weight=1.0,
                                fill=True, fill_opacity=0.22).add_to(fg_t)
             fg_t.add_to(m)
 
@@ -215,7 +224,7 @@ def render_app():
             w_dist = st.slider("거리 가중치", 5.0, 10.0, 8.0, 0.5, key="w_dist")
         with c_opts:
             show_shadow = st.checkbox("그림자 표시", value=True, key="show_shadow")
-            use_trees  = st.checkbox("가로수 그림자 포함", value=False, key="use_trees")
+            use_trees  = st.checkbox("교외 가로수 그림자 포함", value=False, key="use_trees")
         w_shade = 10.0 - w_dist
         st.caption(f"그늘 가중치: **{w_shade:.1f}**  (거리+그늘=10)")
 
@@ -231,7 +240,7 @@ def render_app():
 
         # 시간 기반 그림자/그늘 (건물 + [옵션]가로수)
         with st.spinner("그림자 계산 중..."):
-            rects_bld, rects_tree, shaded_lookup = compute_shades_for_time(
+            rects_bld, rects_campus_tree, rects_tree, shaded_lookup = compute_shades_for_time(
                 dt_local_q.replace(tzinfo=None).isoformat(), use_trees=use_trees
             )
 
@@ -288,6 +297,7 @@ def render_app():
         m = build_map(
             G=G,
             rects_buildings=rects_bld,
+            rects_campus_trees=rects_campus_tree,
             rects_trees=rects_tree,
             path_ll=path_ll,
             clicks=st.session_state.clicks,
