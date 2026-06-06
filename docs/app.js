@@ -28,7 +28,8 @@ function showToast(html, autoHideMs) {
   toastMsg.innerHTML = html;
   toastEl.classList.add("show");
   clearTimeout(toastTimer);
-  if (autoHideMs) toastTimer = setTimeout(hideToast, autoHideMs);
+  // 안내 팝업은 항상 잠깐 떴다가 자동으로 사라진다.
+  toastTimer = setTimeout(hideToast, autoHideMs || 2600);
 }
 function hideToast() { toastEl.classList.remove("show"); }
 

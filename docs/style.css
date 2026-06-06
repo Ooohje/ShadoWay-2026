@@ -167,14 +167,15 @@ ul { margin: 0; padding: 0; list-style: none; }
 
 /* left rail: start dot — line — end square */
 .rail {
-  grid-row: 1 / span 2;
+  grid-column: 1;
+  grid-row: 1 / span 3;        /* 출발 필드 ~ 도착 필드 전체를 덮도록 */
   align-self: stretch;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 4px;
-  padding: 6px 0;
+  padding: 17px 0;             /* 점이 각 입력 줄 중앙에 오도록 */
 }
 .rail .dot {
   width: 11px; height: 11px;
@@ -195,9 +196,10 @@ ul { margin: 0; padding: 0; list-style: none; }
   box-shadow: 0 0 0 3px rgba(239,68,68,.16);
 }
 
-/* swap button spans both rows on the right */
+/* swap button spans both fields on the right */
 #swapBtn {
-  grid-row: 1 / span 2;
+  grid-column: 3;
+  grid-row: 1 / span 3;
   width: 40px; height: 40px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -212,6 +214,7 @@ ul { margin: 0; padding: 0; list-style: none; }
 /* divider between the two fields */
 .search-card .divider {
   grid-column: 2;
+  grid-row: 2;
   height: 1px;
   background: var(--line);
   margin: 1px 0;
@@ -225,6 +228,8 @@ ul { margin: 0; padding: 0; list-style: none; }
   align-items: center;
   height: 46px;
 }
+.search-field[data-which="start"] { grid-row: 1; }
+.search-field[data-which="end"]   { grid-row: 3; }
 .search-field .leading {
   flex: none;
   width: 22px; height: 22px;
