@@ -1,0 +1,20 @@
+# Render(무료 호스트) 배포 설정.
+# 1) https://render.com 에 GitHub 저장소 연결 → "Blueprint"로 이 파일을 읽게 함
+# 2) 환경변수 VWORLD_WFS_KEY 를 대시보드에서 등록 (코드/깃엔 절대 안 넣음)
+# 3) 배포 후 받은 URL(예: https://shadoway-api.onrender.com)을
+#    docs/config.js 의 window.SHADOWAY_API 에 넣고 다시 푸시
+services:
+  - type: web
+    name: shadoway-api
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r server/requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --app-dir server
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: VWORLD_WFS_KEY
+        sync: false
+      - key: ALLOW_ORIGINS
+        value: "*"

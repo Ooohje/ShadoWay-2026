@@ -1,4 +1,0 @@
-streamlit_app/
-├─ app.py          # 엔트리 (페이지 설정 + render_app() 호출만)
-├─ ui.py           # 레이아웃/인터랙션(지도, 패널, CSS)
-└─ core.py         # 함수/데이터(경로계산, 그림자, 로딩 등)

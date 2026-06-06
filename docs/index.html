@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>ShadoWay · 그늘길 안내</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- 상단 검색 카드 (지도앱 스타일) -->
+  <div class="search-card" id="searchCard">
+    <div class="search-row">
+      <div class="search-rail">
+        <span class="rail-dot start"></span>
+        <span class="rail-line"></span>
+        <span class="rail-dot end"></span>
+      </div>
+      <div class="search-fields">
+        <div class="search-field" data-which="start">
+          <input type="text" id="startInput" placeholder="출발지 검색 또는 지도 선택" autocomplete="off" />
+          <button class="field-clear" data-clear="start" title="지우기">×</button>
+          <ul class="suggest" id="startSuggest"></ul>
+        </div>
+        <div class="field-divider"></div>
+        <div class="search-field" data-which="end">
+          <input type="text" id="endInput" placeholder="도착지 검색 또는 지도 선택" autocomplete="off" />
+          <button class="field-clear" data-clear="end" title="지우기">×</button>
+          <ul class="suggest" id="endSuggest"></ul>
+        </div>
+      </div>
+      <button id="swapBtn" class="swap-btn" title="출발↔도착 교체">⇅</button>
+    </div>
+  </div>
+
+  <!-- 우측 플로팅 버튼 -->
+  <div class="fabs">
+    <button id="locBtn" class="fab" title="현재 위치">📍</button>
+  </div>
+
+  <!-- 안내 토스트 -->
+  <div id="toast" class="toast">출발지·도착지를 검색하거나 지도를 누르세요</div>
+
+  <!-- 바텀시트 -->
+  <section class="sheet" id="sheet">
+    <button class="sheet-handle" id="sheetHandle" aria-label="시트 펼치기/접기"></button>
+
+    <div class="sheet-body" id="sheetBody">
+      <div class="row">
+        <label class="field">
+          <span>출발 시각</span>
+          <input type="datetime-local" id="dt" />
+        </label>
+        <button id="nowBtn" class="ghost-btn">지금</button>
+      </div>
+
+      <div class="row">
+        <label class="field full">
+          <span>우선순위 · <b id="prefLabel">균형</b></span>
+          <input type="range" id="wDist" min="5" max="10" step="0.5" value="8" />
+          <div class="range-ends"><span>🌳 그늘 우선</span><span>최단거리 ⚡</span></div>
+        </label>
+      </div>
+
+      <div class="row buttons">
+        <button id="calcBtn" class="primary-btn" disabled>경로 찾기</button>
+        <button id="resetBtn" class="reset-btn">초기화</button>
+      </div>
+
+      <div id="result" class="result hidden">
+        <div class="metric"><div class="m-ic">📏</div><div class="m-val" id="mDist">–</div><div class="m-lab">거리</div></div>
+        <div class="metric"><div class="m-ic">🌳</div><div class="m-val" id="mShade">–</div><div class="m-lab">그늘</div></div>
+        <div class="metric hi"><div class="m-ic">🌿</div><div class="m-val" id="mRatio">–</div><div class="m-lab">그늘 비율</div></div>
+        <div class="metric"><div class="m-ic">☀️</div><div class="m-val" id="mSun">–</div><div class="m-lab">태양고도</div></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="loading" class="loading hidden"><div class="spinner"></div><span>경로 계산 중…</span></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,5 +1,21 @@
 # 가상환경 제외
 venv/
+.venv/
+
+# Claude 로컬 설정(권한)만 제외, launch.json은 공유
+.claude/settings.local.json
+
+# 비밀키/환경설정 (절대 커밋 금지)
+.env
+server/.env
+*.key
+poc/.vworld_key
+
+# 산출물/캐시
+poc/poc_map.html
+__pycache__/
+*.pyc
+.poc_cache/
 
 
 # 문서 디렉토리 제외
