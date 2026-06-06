@@ -1,68 +1,69 @@
-// docs/app.js
+// docs/app.js — ShadoWay 프론트 로직 (Claude Design 스킨에 연결)
 const KNU = [35.8890, 128.6110]; // 기본 중심 (경북대)
 
 // 백엔드 주소: config.js의 window.SHADOWAY_API 사용. 비어있으면 같은 출처.
 const API_BASE = (window.SHADOWAY_API || "").replace(/\/$/, "");
 
+const $ = (id) => document.getElementById(id);
+
+// ===== 지도 =====
 const map = L.map("map", { zoomControl: false, attributionControl: false }).setView(KNU, 16);
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   maxZoom: 20, subdomains: "abcd",
 }).addTo(map);
 L.control.attribution({ position: "bottomleft", prefix: false })
-  .addAttribution("© OpenStreetMap, CARTO · 건물: VWorld").addTo(map);
-
-const $ = (id) => document.getElementById(id);
+  .addAttribution("© OpenStreetMap, CARTO · 건물: VWorld/OSM").addTo(map);
 
 // ===== 상태 =====
 let start = null, end = null;             // [lat, lng]
 let startMarker = null, endMarker = null;
 let routeLayer = null, shadowLayer = null, snapLayer = null;
-let activeField = "start";                // 지도 클릭이 채울 대상
+let activeField = "start";
 
-const toast = $("toast");
-function showToast(html) { toast.innerHTML = html; toast.classList.remove("hide"); }
-function hideToast() { toast.classList.add("hide"); }
+// ===== 토스트 =====
+const toastEl = $("toast");
+const toastMsg = toastEl.querySelector(".toast-msg");
+let toastTimer = null;
+function showToast(html, autoHideMs) {
+  toastMsg.innerHTML = html;
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  if (autoHideMs) toastTimer = setTimeout(hideToast, autoHideMs);
+}
+function hideToast() { toastEl.classList.remove("show"); }
 
+// ===== 마커 핀 (컬러 티어드롭) =====
 function pinIcon(kind) {
-  // kind: "start" | "end" — 컬러 티어드롭 핀(지도앱 스타일)
-  const color = kind === "start" ? "#10b981" : "#ef4444";
+  const color = kind === "start" ? "#16a34a" : "#ef4444";
   const svg = `<svg width="30" height="40" viewBox="0 0 30 40" xmlns="http://www.w3.org/2000/svg">
     <path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25C30 6.7 23.3 0 15 0z" fill="${color}"/>
     <circle cx="15" cy="15" r="6" fill="#fff"/></svg>`;
-  return L.divIcon({ className: "pin-wrap",
-    html: `<div class="pin">${svg}</div>`, iconSize: [30, 40], iconAnchor: [15, 39] });
+  return L.divIcon({ className: "pin-wrap", html: `<div class="pin">${svg}</div>`,
+    iconSize: [30, 40], iconAnchor: [15, 39] });
 }
 
 // ===== 출발/도착 설정 =====
+function setFieldValue(which, label) { $(which + "Input").value = label || ""; }
+
 function setPoint(which, latlng, label) {
   if (which === "start") {
     start = latlng;
     if (startMarker) map.removeLayer(startMarker);
-    startMarker = L.marker(latlng, { icon: pinIcon("🟢") }).addTo(map);
+    startMarker = L.marker(latlng, { icon: pinIcon("start") }).addTo(map);
     setFieldValue("start", label);
     activeField = "end";
   } else {
     end = latlng;
     if (endMarker) map.removeLayer(endMarker);
-    endMarker = L.marker(latlng, { icon: pinIcon("🔴") }).addTo(map);
+    endMarker = L.marker(latlng, { icon: pinIcon("end") }).addTo(map);
     setFieldValue("end", label);
     activeField = "start";
   }
   $("calcBtn").disabled = !(start && end);
-  if (start && end) {
-    showToast("‘경로 찾기’를 눌러보세요 🌿");
-    setTimeout(hideToast, 2000);
-  } else {
-    showToast(which === "start"
-      ? "이제 <b>도착지</b>를 검색하거나 지도를 누르세요"
-      : "출발지·도착지를 지정하세요");
-  }
-}
-
-function setFieldValue(which, label) {
-  const input = $(which + "Input");
-  input.value = label || "";
-  input.closest(".search-field").classList.toggle("has-value", !!label);
+  if (start && end) showToast("‘그늘길 찾기’를 눌러보세요 🌿", 2200);
+  else showToast(which === "start"
+    ? "이제 <b>도착지</b>를 검색하거나 지도를 누르세요"
+    : "출발지·도착지를 지정하세요", 0);
 }
 
 function clearPoint(which) {
@@ -76,15 +77,7 @@ function clearPoint(which) {
 // ===== 지오코딩 (Nominatim / OSM, 키 불필요) =====
 const GEO_URL = "https://nominatim.openstreetmap.org/search";
 const debounceTimers = {};
-
-function geoIconFor(item) {
-  const c = item.class;
-  if (c === "amenity" || c === "shop") return "📍";
-  if (c === "building" || c === "office") return "🏢";
-  if (c === "highway" || c === "place") return "🛣️";
-  if (c === "leisure" || c === "natural") return "🌳";
-  return "📌";
-}
+const PIN_SVG = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="11" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 21c4-4 6.5-7.2 6.5-10A6.5 6.5 0 1 0 5.5 11c0 2.8 2.5 6 6.5 10Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
 
 async function searchPlaces(q) {
   const params = new URLSearchParams({
@@ -96,45 +89,46 @@ async function searchPlaces(q) {
   return res.json();
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function renderSuggest(which, items) {
   const ul = $(which + "Suggest");
   ul.innerHTML = "";
   if (!items || items.length === 0) {
-    ul.innerHTML = `<li class="s-empty">검색 결과가 없어요. 지도를 직접 눌러도 됩니다.</li>`;
-    ul.classList.add("open");
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="sg-ico">${PIN_SVG}</span>
+      <span class="sg-text"><span class="sg-title">검색 결과 없음</span>
+      <span class="sg-sub">지도를 직접 눌러 선택할 수 있어요</span></span>`;
+    ul.appendChild(li);
     return;
   }
   items.forEach((it) => {
     const li = document.createElement("li");
     const main = (it.name || it.display_name.split(",")[0] || "").trim();
-    const sub = it.display_name;
-    li.innerHTML = `<span class="s-ic">${geoIconFor(it)}</span>
-      <span><span class="s-main">${escapeHtml(main)}</span>
-      <span class="s-sub">${escapeHtml(sub)}</span></span>`;
+    li.innerHTML = `<span class="sg-ico">${PIN_SVG}</span>
+      <span class="sg-text"><span class="sg-title">${escapeHtml(main)}</span>
+      <span class="sg-sub">${escapeHtml(it.display_name)}</span></span>`;
     li.onclick = () => {
       const latlng = [parseFloat(it.lat), parseFloat(it.lon)];
       closeSuggest(which);
       map.flyTo(latlng, 17, { duration: 0.6 });
       setPoint(which, latlng, main);
+      $(which + "Input").blur();
     };
     ul.appendChild(li);
   });
-  ul.classList.add("open");
 }
 
-function closeSuggest(which) { $(which + "Suggest").classList.remove("open"); }
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
+function closeSuggest(which) { $(which + "Suggest").innerHTML = ""; } // :empty → 숨김
 
 function wireSearchField(which) {
   const input = $(which + "Input");
   input.addEventListener("focus", () => { activeField = which; });
   input.addEventListener("input", () => {
     const q = input.value.trim();
-    input.closest(".search-field").classList.toggle("has-value", !!q);
     clearTimeout(debounceTimers[which]);
     if (q.length < 2) { closeSuggest(which); return; }
     debounceTimers[which] = setTimeout(async () => {
@@ -145,7 +139,7 @@ function wireSearchField(which) {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      const first = $(which + "Suggest").querySelector("li:not(.s-empty)");
+      const first = $(which + "Suggest").querySelector("li");
       if (first) first.click();
     } else if (e.key === "Escape") { closeSuggest(which); }
   });
@@ -157,7 +151,6 @@ document.querySelectorAll(".field-clear").forEach((btn) => {
   btn.onclick = () => { const w = btn.dataset.clear; clearPoint(w); closeSuggest(w); $(w + "Input").focus(); };
 });
 
-// 바깥 클릭 시 자동완성 닫기
 document.addEventListener("click", (e) => {
   if (!e.target.closest('.search-field[data-which="start"]')) closeSuggest("start");
   if (!e.target.closest('.search-field[data-which="end"]')) closeSuggest("end");
@@ -188,26 +181,26 @@ function prefText(w) {
   if (w >= 6) return "그늘 우선";
   return "그늘 최우선";
 }
+$("prefLabel").textContent = prefText(parseFloat($("wDist").value));
 $("wDist").oninput = (e) => { $("prefLabel").textContent = prefText(parseFloat(e.target.value)); };
 
-// ===== GPS 자동 위치 =====
+// ===== GPS 현재 위치 =====
 function locateAsStart() {
-  if (!navigator.geolocation) { showToast("출발지·도착지를 검색하거나 지도를 누르세요"); return; }
-  showToast("📍 현재 위치를 찾는 중…");
+  if (!navigator.geolocation) { showToast("출발지·도착지를 검색하거나 지도를 누르세요", 0); return; }
+  showToast("📍 현재 위치를 찾는 중…", 0);
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const p = [pos.coords.latitude, pos.coords.longitude];
       map.setView(p, 17);
       setPoint("start", p, "현재 위치");
     },
-    () => { showToast("위치 권한이 없어요. 검색하거나 지도를 누르세요"); },
+    () => { showToast("위치 권한이 없어요. 검색하거나 지도를 누르세요", 3500); },
     { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
   );
 }
-locateAsStart();
 $("locBtn").onclick = locateAsStart;
 
-// ===== 지도 클릭 → 활성 필드 채우기 (이름은 역지오코딩) =====
+// ===== 지도 클릭 → 활성 필드 채우기 (역지오코딩으로 이름) =====
 map.on("click", async (e) => {
   const p = [e.latlng.lat, e.latlng.lng];
   const which = (!start) ? "start" : (!end ? "end" : activeField);
@@ -222,7 +215,7 @@ map.on("click", async (e) => {
       const name = (j.name || (j.display_name || "").split(",")[0] || "").trim();
       if (name) setFieldValue(which, name);
     }
-  } catch { /* 이름 없으면 그대로 둠 */ }
+  } catch { /* 이름 없으면 그대로 */ }
 });
 
 // ===== 바텀시트 접기/펼치기 =====
@@ -236,14 +229,14 @@ function resetRoute() {
   setFieldValue("start", ""); setFieldValue("end", "");
   activeField = "start";
   $("calcBtn").disabled = true;
-  $("result").classList.add("hidden");
+  $("result").hidden = true;
 }
-$("resetBtn").onclick = () => { resetRoute(); showToast("출발지·도착지를 검색하거나 지도를 누르세요"); };
+$("resetBtn").onclick = () => { resetRoute(); showToast("출발지·도착지를 검색하거나 지도를 누르세요", 2500); };
 
 // ===== 경로 계산 =====
 $("calcBtn").onclick = async () => {
   if (!start || !end) return;
-  $("loading").classList.remove("hidden");
+  $("loading").hidden = false;
   try {
     const body = {
       start, end,
@@ -261,10 +254,9 @@ $("calcBtn").onclick = async () => {
     }
     drawResult(await res.json());
   } catch (e) {
-    showToast("⚠️ " + e.message);
-    toast.classList.remove("hide");
+    showToast("⚠️ " + e.message, 5000);
   } finally {
-    $("loading").classList.add("hidden");
+    $("loading").hidden = true;
   }
 };
 
@@ -281,25 +273,54 @@ function drawResult(data) {
 
   routeLayer = L.layerGroup([
     L.polyline(data.route, { color: "#ffffff", weight: 10, opacity: 0.9, lineCap: "round", lineJoin: "round" }),
-    L.polyline(data.route, { color: "#ef4444", weight: 6, opacity: 0.98, lineCap: "round", lineJoin: "round" }),
+    L.polyline(data.route, { color: "#0f766e", weight: 6, opacity: 0.98, lineCap: "round", lineJoin: "round" }),
   ]).addTo(map);
   const routeBounds = L.polyline(data.route).getBounds();
   snapLayer = L.layerGroup([
-    L.circleMarker(data.start_snapped, { radius: 6, color: "#10b981", fillColor: "#10b981", fillOpacity: 1 }),
+    L.circleMarker(data.start_snapped, { radius: 6, color: "#16a34a", fillColor: "#16a34a", fillOpacity: 1 }),
     L.circleMarker(data.end_snapped, { radius: 6, color: "#ef4444", fillColor: "#ef4444", fillOpacity: 1 }),
   ]).addTo(map);
-  map.fitBounds(routeBounds, { padding: [80, 90] });
+  map.fitBounds(routeBounds, { padding: [90, 70] });
 
+  // 통계 → 디자인 지표(숫자만, 단위는 별도 span)
   const s = data.stats;
-  $("mDist").textContent = (s.distance_m >= 1000)
-    ? (s.distance_m / 1000).toFixed(2) + "km" : Math.round(s.distance_m) + "m";
-  $("mShade").textContent = Math.round(s.shade_m) + "m";
-  $("mRatio").textContent = (s.shade_ratio * 100).toFixed(0) + "%";
-  $("mSun").textContent = s.sun_alt + "°";
-  $("result").classList.remove("hidden");
+  if (s.distance_m >= 1000) {
+    $("mDist").textContent = (s.distance_m / 1000).toFixed(2);
+    $("mDistUnit").textContent = "km";
+  } else {
+    $("mDist").textContent = Math.round(s.distance_m);
+    $("mDistUnit").textContent = "m";
+  }
+  $("mShade").textContent = Math.round(s.shade_m);
+  const ratioPct = Math.round((s.shade_ratio || 0) * 100);
+  $("mRatio").textContent = ratioPct;
+  $("mSun").textContent = s.sun_alt;
+
+  // 도넛 링을 그늘 비율에 맞춰 채우기
+  const ring = document.querySelector(".metric.feature .ring");
+  if (ring) ring.style.background =
+    `conic-gradient(rgba(255,255,255,.95) 0 ${ratioPct}%, rgba(255,255,255,.22) ${ratioPct}% 100%)`;
+
+  $("result").hidden = false;
   $("sheet").classList.remove("collapsed");
   hideToast();
 }
+
+// ===== Render 백엔드 워밍업 + GPS 자동 시작 (온보딩 진입 시) =====
+function warmBackend() {
+  if (!API_BASE) return;
+  fetch(API_BASE + "/api/health").catch(() => {});
+}
+let entered = false;
+function onEnterApp() {
+  if (entered) return; entered = true;
+  map.invalidateSize();
+  warmBackend();
+  locateAsStart();
+}
+window.addEventListener("shadoway:enter", onEnterApp, { once: true });
+// 온보딩 스크립트가 없거나 이벤트를 놓쳤을 때의 안전장치
+setTimeout(() => { const i = $("intro"); if (!i || i.classList.contains("gone")) onEnterApp(); }, 1200);
 
 // PWA service worker
 if ("serviceWorker" in navigator) {

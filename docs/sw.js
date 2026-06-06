@@ -1,7 +1,7 @@
 // 앱 셸 캐시. 전략: 네트워크 우선(network-first) — 항상 최신을 받아오고,
 // 오프라인일 때만 캐시로 폴백한다. 그래서 배포 즉시 갱신이 반영된다.
 // 지도 타일/API 는 캐시하지 않고 그대로 통과.
-const CACHE = "shadoway-v2";
+const CACHE = "shadoway-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "config.js",
   "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 

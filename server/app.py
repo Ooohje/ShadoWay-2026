@@ -83,10 +83,18 @@ def _load_area(bbox, bld_src):
         return _area_cache[key]
     south, west, north, east = bbox
     area = osm_loader.load_osm_area(south, west, north, east)
+    # area.buildings 는 이 시점에 이미 OSM 건물로 채워져 있다(폴백 기본값).
+    area.bld_source = "osm"
     if bld_src == "vworld":
-        from vworld_loader import load_buildings_vworld
-        area.buildings = load_buildings_vworld(south, west, north, east,
-                                               area.lat0, area.lng0)
+        # VWorld 건물(정확한 높이)을 시도하되, 실패(502 등)하면 OSM 건물로 폴백.
+        try:
+            from vworld_loader import load_buildings_vworld
+            vb = load_buildings_vworld(south, west, north, east, area.lat0, area.lng0)
+            if vb is not None and len(vb) > 0:
+                area.buildings = vb
+                area.bld_source = "vworld"
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] VWorld 실패 → OSM 건물로 폴백: {e}", flush=True)
     _area_cache[key] = area
     return area
 
@@ -144,6 +152,7 @@ def compute_route(req: RouteRequest):
             "sun_alt": round(alt, 1),
             "sun_az": round(az, 1),
             "n_buildings": int(len(area.buildings)),
+            "bld_source": getattr(area, "bld_source", "osm"),
         },
         "route": route_ll,
         "start_snapped": [G.nodes[src]["lat"], G.nodes[src]["lng"]],

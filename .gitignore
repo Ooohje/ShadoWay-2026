@@ -23,3 +23,6 @@ __pycache__/
 
 # shadoway(2024) 디렉토리 제외
 shadoway(2024)/
+
+# 디자인 핸드오프 임시 추출
+.design_tmp/
