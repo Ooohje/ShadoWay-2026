@@ -322,7 +322,15 @@ window.addEventListener("shadoway:enter", onEnterApp, { once: true });
 // 온보딩 스크립트가 없거나 이벤트를 놓쳤을 때의 안전장치
 setTimeout(() => { const i = $("intro"); if (!i || i.classList.contains("gone")) onEnterApp(); }, 1200);
 
-// PWA service worker
+// PWA service worker — 새 버전이 활성화되면 한 번 자동 새로고침해 최신 화면을 보여준다.
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register("sw.js")
+    .then((reg) => { reg.update(); })
+    .catch(() => {});
 }
