@@ -64,8 +64,8 @@ class RouteRequest(BaseModel):
     end: list[float]        # [lat, lng]
     datetime: str | None = None   # ISO, KST. 없으면 현재
     w_dist: float = 8.0           # 거리 가중치 5~10
-    bld_src: str = "vworld"       # "vworld" | "osm"
-    margin_m: float = 250.0       # 두 점 주변 여유 반경(m)
+    bld_src: str = "osm"          # "osm"(빠름·기본) | "vworld"(정확하지만 호스트에서 느릴 수 있음)
+    margin_m: float = 180.0       # 두 점 주변 여유 반경(m) — 작을수록 빠름
 
 
 def _bbox_from_points(start, end, margin_m):
@@ -129,10 +129,12 @@ def compute_route(req: RouteRequest):
     shadow_union, shadows, (alt, az) = shadow_poly.build_shadow_union(
         area.buildings, dt_local, area.lat0, area.lng0
     )
+    # STRtree 공간 인덱스로 간선마다 '근처' 그림자만 교차 → Render에서도 수초 내 계산
+    tree, shadow_list = shadow_poly.build_shade_index(shadows)
     for u, v in G.edges:
         p0 = (G.nodes[u]["x"], G.nodes[u]["y"])
         p1 = (G.nodes[v]["x"], G.nodes[v]["y"])
-        G[u][v]["shaded_len_m"] = shadow_poly.edge_shade_length(p0, p1, shadow_union)
+        G[u][v]["shaded_len_m"] = shadow_poly.edge_shade_length_idx(p0, p1, tree, shadow_list)
 
     core.apply_edge_costs(G, w_dist, w_shade)
     try:

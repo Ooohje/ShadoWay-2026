@@ -37,7 +37,7 @@ def _get_key() -> str:
 
 
 def fetch_wfs(south: float, west: float, north: float, east: float,
-              max_features: int = 1000, timeout: int = 60) -> str:
+              max_features: int = 1000, timeout: int = 12, attempts: int = 1) -> str:
     # bbox 축 순서: miny,minx,maxy,maxx = lat,lon,lat,lon (EPSG:4326)
     params = {
         "key": _get_key(),
@@ -48,7 +48,7 @@ def fetch_wfs(south: float, west: float, north: float, east: float,
         "output": "GML2",
     }
     last_err = None
-    for _ in range(3):
+    for i in range(max(1, attempts)):
         try:
             r = requests.get(WFS_URL, params=params, timeout=timeout)
             r.raise_for_status()
@@ -57,7 +57,8 @@ def fetch_wfs(south: float, west: float, north: float, east: float,
             return r.text
         except Exception as e:  # noqa: BLE001
             last_err = e
-            time.sleep(1)
+            if i < attempts - 1:
+                time.sleep(0.5)
     raise RuntimeError(f"VWorld WFS 요청 실패: {last_err}")
 
 

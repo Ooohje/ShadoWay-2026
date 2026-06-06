@@ -242,7 +242,7 @@ $("calcBtn").onclick = async () => {
       start, end,
       datetime: $("dt").value || null,
       w_dist: parseFloat($("wDist").value),
-      bld_src: "vworld",
+      bld_src: "osm",
     };
     const res = await fetch(API_BASE + "/api/route", {
       method: "POST", headers: { "Content-Type": "application/json" },

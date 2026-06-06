@@ -23,6 +23,7 @@ import pandas as pd
 from shapely.geometry import Polygon, LineString
 from shapely.ops import unary_union
 from shapely.affinity import translate
+from shapely.strtree import STRtree
 
 # core.py 의 태양각/좌표 유틸 재사용 (run_poc 에서 sys.path 설정됨)
 from core import sun_angles_deg, unit_vec_from_azimuth, latlng_to_xy, xy_to_ll
@@ -74,11 +75,41 @@ def build_shadow_union(buildings: pd.DataFrame, dt_local: datetime.datetime,
 
 
 def edge_shade_length(p0, p1, shadow_union) -> float:
-    """간선(p0->p1, local xy) 이 그림자합집합과 겹치는 실제 길이(m)."""
+    """간선(p0->p1, local xy) 이 그림자합집합과 겹치는 실제 길이(m). (단순/느린 경로)"""
     if shadow_union is None:
         return 0.0
     seg = LineString([p0, p1])
     inter = seg.intersection(shadow_union)
+    if inter.is_empty:
+        return 0.0
+    return float(inter.length)
+
+
+def build_shade_index(shadows):
+    """개별 그림자 폴리곤들로 STRtree 공간 인덱스를 만든다.
+    간선마다 전체 합집합과 교차하는 대신, 근처 그림자만 골라 교차해 훨씬 빠르다."""
+    if not shadows:
+        return None, []
+    try:
+        return STRtree(shadows), shadows
+    except Exception:  # noqa: BLE001
+        return None, shadows
+
+
+def edge_shade_length_idx(p0, p1, tree, shadows) -> float:
+    """STRtree 인덱스를 이용한 간선 그늘 길이(m)."""
+    if tree is None or not shadows:
+        return 0.0
+    seg = LineString([p0, p1])
+    res = tree.query(seg)  # shapely 2.x: 후보 인덱스 ndarray
+    if len(res) == 0:
+        return 0.0
+    cand = []
+    for item in res:
+        # shapely 2.x 는 정수 인덱스, 일부 환경은 geometry 를 돌려줄 수 있어 모두 처리
+        cand.append(shadows[int(item)] if isinstance(item, (int,)) or hasattr(item, "__index__") else item)
+    geom = cand[0] if len(cand) == 1 else unary_union(cand)
+    inter = seg.intersection(geom)
     if inter.is_empty:
         return 0.0
     return float(inter.length)
