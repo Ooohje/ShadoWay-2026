@@ -2,8 +2,8 @@
 venv/
 .venv/
 
-# Claude 로컬 설정(권한)만 제외, launch.json은 공유
-.claude/settings.local.json
+# Claude 로컬 설정 전체 제외
+.claude/
 
 # 비밀키/환경설정 (절대 커밋 금지)
 .env
