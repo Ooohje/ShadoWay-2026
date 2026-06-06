@@ -23,9 +23,14 @@ const toast = $("toast");
 function showToast(html) { toast.innerHTML = html; toast.classList.remove("hide"); }
 function hideToast() { toast.classList.add("hide"); }
 
-function pinIcon(emoji) {
-  return L.divIcon({ className: "", html: `<div class="pin">${emoji}</div>`,
-    iconSize: [30, 30], iconAnchor: [15, 28] });
+function pinIcon(kind) {
+  // kind: "start" | "end" — 컬러 티어드롭 핀(지도앱 스타일)
+  const color = kind === "start" ? "#10b981" : "#ef4444";
+  const svg = `<svg width="30" height="40" viewBox="0 0 30 40" xmlns="http://www.w3.org/2000/svg">
+    <path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25C30 6.7 23.3 0 15 0z" fill="${color}"/>
+    <circle cx="15" cy="15" r="6" fill="#fff"/></svg>`;
+  return L.divIcon({ className: "pin-wrap",
+    html: `<div class="pin">${svg}</div>`, iconSize: [30, 40], iconAnchor: [15, 39] });
 }
 
 // ===== 출발/도착 설정 =====
