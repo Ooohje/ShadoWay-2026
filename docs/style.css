@@ -254,18 +254,20 @@ ul { margin: 0; padding: 0; list-style: none; }
 
 .field-clear {
   flex: none;
-  width: 28px; height: 28px;
+  width: 30px; height: 30px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  color: var(--ink-3);
-  background: #f1f4f4;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .12s ease;
+  color: var(--ink-2);
+  background: #eef1f1;
+  opacity: 1;                 /* 항상 보이는 삭제(×) 버튼 */
+  pointer-events: auto;
+  transition: opacity .12s ease, background .12s ease;
 }
-.search-field input:not(:placeholder-shown) ~ .field-clear { opacity: 1; pointer-events: auto; }
-.field-clear:hover { background: #e7ebeb; color: var(--ink-2); }
-.field-clear svg { width: 14px; height: 14px; }
+/* 값이 있을 때 더 또렷하게 */
+.search-field input:not(:placeholder-shown) ~ .field-clear { background: #e3e8e8; color: var(--ink); }
+.field-clear:hover  { background: #d9dfdf; color: var(--ink); }
+.field-clear:active { transform: scale(.9); }
+.field-clear svg { width: 15px; height: 15px; }
 
 /* autocomplete dropdowns */
 #startSuggest, #endSuggest {
