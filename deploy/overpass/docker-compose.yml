@@ -1,0 +1,35 @@
+# ShadoWay 자체 Overpass API (한국 전역) — 상용/안정 운영용
+#
+# 무료 공개 Overpass는 불안정하고 상용 사용이 금지되어 있어, 직접 1대 띄운다.
+# 이 인스턴스에 한국 OSM 추출본(Geofabrik)을 적재하면 전국 도로/건물을
+# 무제한·안정적으로 bbox 조회할 수 있고, 백엔드는 OVERPASS_URLS 만 바꾸면 된다.
+#
+# 사용:
+#   docker compose up -d            # 최초 1회: 한국 데이터 다운로드+빌드(수십 분~)
+#   curl "http://localhost:12345/api/interpreter?data=[out:json];out;"   # 동작 확인
+#   # 백엔드(Render 등)에 환경변수 설정:
+#   #   OVERPASS_URLS=http://<이서버_공인IP_또는_도메인>:12345/api/interpreter
+#   #   OVERPASS_TIMEOUT=60
+#
+# 권장 사양(한국 전역): RAM 4GB+, 디스크 15GB+ (메타 포함 시 더). 빌드 중 일시적으로 더 필요.
+services:
+  overpass:
+    image: wiktorn/overpass-api:latest
+    container_name: shadoway-overpass
+    ports:
+      - "12345:80"
+    environment:
+      OVERPASS_META: "attic"                  # 히스토리 불필요면 "no" 로 더 가볍게
+      OVERPASS_MODE: "init"                   # 최초 빌드. 빌드 끝나면 자동으로 운영 모드
+      OVERPASS_PLANET_URL: "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
+      OVERPASS_DIFF_URL: "https://download.geofabrik.de/asia/south-korea-updates/"
+      OVERPASS_RULES_LOAD: "10"
+      OVERPASS_PLANET_PREPROCESS: "yes"
+      # 동시 요청/타임아웃 여유
+      OVERPASS_MAX_TIMEOUT: "1000"
+    volumes:
+      - overpass_db:/db
+    restart: unless-stopped
+
+volumes:
+  overpass_db:

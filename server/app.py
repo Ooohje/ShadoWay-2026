@@ -94,10 +94,33 @@ def _bbox_from_points(start, end, margin_m):
     return (lat_min - dlat, lng_min - dlng, lat_max + dlat, lng_max + dlng)
 
 
+# 영속 캐시 디렉토리(선택): SHADOWAY_CACHE_DIR 설정 시 받아온 지역을 디스크에 저장→재시작에도 유지.
+_CACHE_DIR = os.environ.get("SHADOWAY_CACHE_DIR", "").strip()
+if _CACHE_DIR:
+    try:
+        Path(_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+    except Exception:  # noqa: BLE001
+        _CACHE_DIR = ""
+
+def _disk_path(key):
+    safe = "_".join(str(k) for k in key).replace("/", "_").replace(":", "_")
+    return Path(_CACHE_DIR) / f"area_{safe}.pkl"
+
+
 def _load_area(bbox, bld_src):
     key = (bld_src, *[round(v, 4) for v in bbox])
     if key in _area_cache:
         return _area_cache[key]
+    # 디스크 영속 캐시 조회
+    if _CACHE_DIR:
+        dp = _disk_path(key)
+        if dp.exists():
+            try:
+                area = pickle.load(open(dp, "rb"))
+                _area_cache[key] = area
+                return area
+            except Exception:  # noqa: BLE001
+                pass
     south, west, north, east = bbox
     area = osm_loader.load_osm_area(south, west, north, east)
     # area.buildings 는 이 시점에 이미 OSM 건물로 채워져 있다(폴백 기본값).
@@ -113,6 +136,11 @@ def _load_area(bbox, bld_src):
         except Exception as e:  # noqa: BLE001
             print(f"[warn] VWorld 실패 → OSM 건물로 폴백: {e}", flush=True)
     _area_cache[key] = area
+    if _CACHE_DIR:
+        try:
+            pickle.dump(area, open(_disk_path(key), "wb"), protocol=4)
+        except Exception:  # noqa: BLE001
+            pass
     return area
 
 
