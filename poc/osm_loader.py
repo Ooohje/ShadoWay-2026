@@ -63,7 +63,9 @@ def haversine_m(lat1, lng1, lat2, lng2):
 
 # ---------- Overpass 호출 ----------
 def fetch_overpass(south: float, west: float, north: float, east: float,
-                   timeout: int = 40, rounds: int = 2) -> dict:
+                   timeout: int = 18, rounds: int = 1) -> dict:
+    # 공개 Overpass 가 불안정할 때 오래 매달리지 않도록 '빠른 실패' 정책.
+    # (사전구축 지역=경북대는 이 경로를 타지 않음)
     q = f"""
     [out:json][timeout:{timeout}];
     (
@@ -76,13 +78,12 @@ def fetch_overpass(south: float, west: float, north: float, east: float,
     for rnd in range(rounds):
         for url in OVERPASS_URLS:
             try:
-                r = requests.post(url, data={"data": q}, timeout=timeout + 20)
+                r = requests.post(url, data={"data": q}, timeout=(8, timeout))
                 r.raise_for_status()
                 return r.json()
             except Exception as e:  # noqa: BLE001
                 last_err = e
                 continue
-        time.sleep(1.5)
     raise RuntimeError(f"Overpass 요청 실패(모든 미러): {last_err}")
 
 

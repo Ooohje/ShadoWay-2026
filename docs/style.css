@@ -917,3 +917,10 @@ input[type="range"]#wDist {
 /* teardrop pin marker (divIcon) */
 .pin-wrap { background: none; border: none; }
 .pin { line-height: 0; filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); }
+
+/* 실시간 내 위치 점(펄스) — 경로 따라가기 */
+.me-dot { width: 16px; height: 16px; border-radius: 50%; background: #1d72e8;
+  border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(29,114,232,.25), 0 1px 4px rgba(0,0,0,.3); }
+.me-dot::after { content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(29,114,232,.5); animation: mepulse 1.8s ease-out infinite; }
+@keyframes mepulse { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(2.6); opacity: 0; } }

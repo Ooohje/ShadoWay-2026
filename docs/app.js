@@ -19,6 +19,7 @@ let start = null, end = null;             // [lat, lng]
 let startMarker = null, endMarker = null;
 let routeLayer = null, shadowLayer = null, snapLayer = null;
 let activeField = "start";
+let meMarker = null, watchId = null;   // 실시간 내 위치(경로 따라가기)
 
 // ===== 토스트 =====
 const toastEl = $("toast");
@@ -222,8 +223,33 @@ map.on("click", async (e) => {
 // ===== 바텀시트 접기/펼치기 =====
 $("sheetHandle").onclick = () => $("sheet").classList.toggle("collapsed");
 
+// ===== 실시간 내 위치(경로 따라가기) =====
+function startFollow() {
+  if (!navigator.geolocation || watchId != null) return;
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const p = [pos.coords.latitude, pos.coords.longitude];
+      if (!meMarker) {
+        meMarker = L.marker(p, {
+          icon: L.divIcon({ className: "", html: '<div class="me-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+          zIndexOffset: 1000, interactive: false,
+        }).addTo(map);
+      } else {
+        meMarker.setLatLng(p);
+      }
+    },
+    () => {},
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 12000 }
+  );
+}
+function stopFollow() {
+  if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (meMarker) { map.removeLayer(meMarker); meMarker = null; }
+}
+
 // ===== 초기화 =====
 function resetRoute() {
+  stopFollow();
   [startMarker, endMarker, routeLayer, shadowLayer, snapLayer].forEach((l) => l && map.removeLayer(l));
   startMarker = endMarker = routeLayer = shadowLayer = snapLayer = null;
   start = end = null;
@@ -238,6 +264,9 @@ $("resetBtn").onclick = () => { resetRoute(); showToast("출발지·도착지를
 $("calcBtn").onclick = async () => {
   if (!start || !end) return;
   $("loading").hidden = false;
+  // 무한 대기 방지: 90초 내 응답 없으면 중단
+  const ac = new AbortController();
+  const killer = setTimeout(() => ac.abort(), 90000);
   try {
     const body = {
       start, end,
@@ -247,16 +276,22 @@ $("calcBtn").onclick = async () => {
     };
     const res = await fetch(API_BASE + "/api/route", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body), signal: ac.signal,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "경로 계산 실패");
+      throw new Error(err.detail || ("서버 오류 (" + res.status + ")"));
     }
     drawResult(await res.json());
   } catch (e) {
-    showToast("⚠️ " + e.message, 5000);
+    const msg = (e.name === "AbortError")
+      ? "응답이 너무 느려요. 경북대 안에서 시도하면 빠릅니다 🌳"
+      : /fail|load|network/i.test(e.message)
+        ? "서버 연결 실패 — 첫 요청은 서버 깨우는 중일 수 있어요. 잠시 후 다시 시도해 주세요"
+        : e.message;
+    showToast("⚠️ " + msg, 6000);
   } finally {
+    clearTimeout(killer);
     $("loading").hidden = true;
   }
 };
@@ -305,6 +340,7 @@ function drawResult(data) {
   $("result").hidden = false;
   $("sheet").classList.remove("collapsed");
   hideToast();
+  startFollow();   // 경로가 그려지면 실시간 내 위치 점으로 따라가기
 }
 
 // ===== Render 백엔드 워밍업 + GPS 자동 시작 (온보딩 진입 시) =====
