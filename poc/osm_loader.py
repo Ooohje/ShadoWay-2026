@@ -36,13 +36,23 @@ WALKABLE_HIGHWAYS = {
 DEFAULT_HEIGHT_M = 12.0   # 높이 정보가 전혀 없을 때 가정 (≈4층)
 LEVEL_HEIGHT_M = 3.3      # building:levels 1개층당 높이
 
-OVERPASS_URLS = [
+import os
+
+# 상용/안정 운영용: 자체 또는 유료 Overpass 엔드포인트를 환경변수로 주입.
+#   OVERPASS_URLS="https://overpass.mycompany.com/api/interpreter,https://backup/api/interpreter"
+# 설정 시 그 엔드포인트를 우선 사용한다. (코드 수정 없이 데이터 소스 교체 가능)
+_DEFAULT_OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.openstreetmap.ru/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
 ]
+_env_overpass = os.environ.get("OVERPASS_URLS", "").strip()
+OVERPASS_URLS = ([u.strip() for u in _env_overpass.split(",") if u.strip()]
+                 if _env_overpass else _DEFAULT_OVERPASS_URLS)
+# 자체 엔드포인트는 더 오래 기다려도 안전 → 환경변수로 타임아웃도 조절
+OVERPASS_TIMEOUT = int(os.environ.get("OVERPASS_TIMEOUT", "18"))
 
 
 # ---------- 좌표 변환 (core.py 와 동일한 ENU) ----------
@@ -63,7 +73,9 @@ def haversine_m(lat1, lng1, lat2, lng2):
 
 # ---------- Overpass 호출 ----------
 def fetch_overpass(south: float, west: float, north: float, east: float,
-                   timeout: int = 18, rounds: int = 1) -> dict:
+                   timeout: int = None, rounds: int = 1) -> dict:
+    if timeout is None:
+        timeout = OVERPASS_TIMEOUT
     # 공개 Overpass 가 불안정할 때 오래 매달리지 않도록 '빠른 실패' 정책.
     # (사전구축 지역=경북대는 이 경로를 타지 않음)
     q = f"""
