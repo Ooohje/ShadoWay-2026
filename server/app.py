@@ -42,8 +42,25 @@ if _env_file.exists():
 import core  # noqa: E402
 import osm_loader  # noqa: E402
 import shadow_poly  # noqa: E402
+import pickle  # noqa: E402
 
 app = FastAPI(title="ShadoWay API")
+
+# ---- 사전구축(prebuilt) 지역: 경북대 (Overpass 없이 즉시 처리) ----
+_PREBUILT = None
+def _load_prebuilt():
+    global _PREBUILT
+    if _PREBUILT is None:
+        p = ROOT / "artifacts" / "knu_prebuilt.pkl"
+        try:
+            _PREBUILT = pickle.load(open(p, "rb")) if p.exists() else {}
+        except Exception:  # noqa: BLE001
+            _PREBUILT = {}
+    return _PREBUILT or None
+
+def _within(bbox, pt):
+    s, w, n, e = bbox
+    return (s <= pt[0] <= n) and (w <= pt[1] <= e)
 
 # GitHub Pages(다른 도메인) 프론트에서 호출하므로 CORS 허용.
 # ALLOW_ORIGINS 환경변수(쉼표구분)로 좁힐 수 있고, 없으면 전체 허용.
@@ -99,6 +116,55 @@ def _load_area(bbox, bld_src):
     return area
 
 
+def _route_prebuilt(pre, req, dt_local, w_dist, w_shade):
+    """경북대 사전구축 그래프 + 직사각형 그림자(빠름)로 경로 계산. (Overpass 미사용)"""
+    G = pre["G"].copy()
+    lat0, lng0 = pre["lat0"], pre["lng0"]
+    buildings = pre["buildings"]
+
+    sx, sy = osm_loader.latlng_to_xy(req.start[0], req.start[1], lat0, lng0)
+    ex, ey = osm_loader.latlng_to_xy(req.end[0], req.end[1], lat0, lng0)
+    src = core.nearest_node_xy(G, sx, sy)
+    dst = core.nearest_node_xy(G, ex, ey)
+    if src == dst:
+        raise HTTPException(400, "출발지와 도착지가 너무 가깝습니다.")
+
+    alt, az = core.sun_angles_deg(dt_local, lat0, lng0)
+    rects = core.build_shadow_rects(buildings, dt_local, lat0, lng0)  # alt<=0이면 []
+    for u, v in G.edges:
+        p0 = (G.nodes[u]["x"], G.nodes[u]["y"])
+        p1 = (G.nodes[v]["x"], G.nodes[v]["y"])
+        G[u][v]["shaded_len_m"] = core.compute_unique_shade_length_for_edge(p0, p1, rects)
+
+    core.apply_edge_costs(G, w_dist, w_shade)
+    try:
+        path = nx.shortest_path(G, src, dst, weight="cost")
+    except nx.NetworkXNoPath:
+        raise HTTPException(404, "두 지점을 잇는 경로가 없습니다.")
+
+    info = core.summarize_path(G, path)
+    route_ll = [[G.nodes[n]["lat"], G.nodes[n]["lng"]] for n in path]
+    shadows = []
+    for r in rects:
+        shadows.append([list(core.xy_to_ll(x, y, lat0, lng0)) for (x, y) in r.corners()])
+
+    return {
+        "stats": {
+            "distance_m": round(info["total_len_m"], 1),
+            "shade_m": round(info["total_shade_m"], 1),
+            "shade_ratio": round(info["shade_ratio"], 4),
+            "sun_alt": round(alt, 1),
+            "sun_az": round(az, 1),
+            "n_buildings": int(len(buildings)),
+            "bld_source": "prebuilt-knu",
+        },
+        "route": route_ll,
+        "start_snapped": [G.nodes[src]["lat"], G.nodes[src]["lng"]],
+        "end_snapped": [G.nodes[dst]["lat"], G.nodes[dst]["lng"]],
+        "shadows": shadows,
+    }
+
+
 @app.post("/api/route")
 def compute_route(req: RouteRequest):
     if req.datetime:
@@ -108,6 +174,11 @@ def compute_route(req: RouteRequest):
 
     w_dist = max(5.0, min(10.0, req.w_dist))
     w_shade = 10.0 - w_dist
+
+    # 사전구축 지역(경북대) 안이면 Overpass 없이 즉시 처리
+    pre = _load_prebuilt()
+    if pre and _within(pre["bbox"], req.start) and _within(pre["bbox"], req.end):
+        return _route_prebuilt(pre, req, dt_local, w_dist, w_shade)
 
     bbox = _bbox_from_points(req.start, req.end, req.margin_m)
     try:
