@@ -323,15 +323,10 @@ window.addEventListener("shadoway:enter", onEnterApp, { once: true });
 // 온보딩 스크립트가 없거나 이벤트를 놓쳤을 때의 안전장치
 setTimeout(() => { const i = $("intro"); if (!i || i.classList.contains("gone")) onEnterApp(); }, 1200);
 
-// PWA service worker — 새 버전이 활성화되면 한 번 자동 새로고침해 최신 화면을 보여준다.
+// 서비스워커는 (개발 중 캐시 문제 방지를 위해) 새로 등록하지 않는다.
+// 이미 등록돼 있던 예전 SW는 sw.js(킬 스위치)가 비우고 스스로 해제한다.
 if ("serviceWorker" in navigator) {
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (refreshing) return;
-    refreshing = true;
-    location.reload();
-  });
-  navigator.serviceWorker.register("sw.js")
-    .then((reg) => { reg.update(); })
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.forEach((r) => r.update().catch(() => {})))
     .catch(() => {});
 }

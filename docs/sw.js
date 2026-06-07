@@ -1,34 +1,17 @@
-// 앱 셸 캐시. 전략: 네트워크 우선(network-first) — 항상 최신을 받아오고,
-// 오프라인일 때만 캐시로 폴백한다. 그래서 배포 즉시 갱신이 반영된다.
-// 지도 타일/API 는 캐시하지 않고 그대로 통과.
-const CACHE = "shadoway-v3";
-const SHELL = ["./", "index.html", "style.css", "app.js", "config.js",
-  "manifest.webmanifest", "icon-192.png", "icon-512.png"];
-
-self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
-});
+// 킬 스위치 서비스워커.
+// 개발 중 예전(cache-first) 서비스워커가 옛 화면을 계속 보여주는 문제를 끝내기 위해,
+// 모든 캐시를 비우고 자기 자신을 등록 해제한 뒤, 열린 탭을 한 번 새로고침한다.
+// 그 이후로는 서비스워커가 없어 항상 네트워크에서 최신본을 받는다.
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((keys) =>
-    Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-  ).then(() => self.clients.claim()));
-});
-
-self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== "GET") return;            // 변경요청 통과
-  if (url.origin !== location.origin) return;         // 타일 등 외부 통과
-  if (url.pathname.startsWith("/api/")) return;       // API 통과
-
-  // network-first: 최신 우선, 성공 시 캐시 갱신, 실패(오프라인) 시 캐시 폴백
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-        return res;
-      })
-      .catch(() => caches.match(e.request).then((hit) => hit || caches.match("./")))
-  );
+  e.waitUntil((async () => {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (_) {}
+    try { await self.registration.unregister(); } catch (_) {}
+    const clients = await self.clients.matchAll({ type: "window" });
+    clients.forEach((c) => { try { c.navigate(c.url); } catch (_) {} });
+  })());
 });
